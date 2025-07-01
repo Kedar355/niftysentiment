@@ -1,17 +1,23 @@
 "use client"
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/components/auth-provider';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/navbar';
 import StockCard from '@/components/stock-card';
 import MarketIndicesWidget from '@/components/market-indices-widget';
+import MarketHeatmap from '@/components/market-heatmap';
+import MarketMovers from '@/components/market-movers';
+import PriceAlerts from '@/components/price-alerts';
+import TechnicalScanner from '@/components/technical-scanner';
+import PortfolioTracker from '@/components/portfolio-tracker';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { StockCardSkeleton, MarketOverviewSkeleton } from '@/components/ui/skeleton';
 import {
   TrendingUp,
   TrendingDown,
@@ -28,7 +34,10 @@ import {
   Users,
   Zap,
   Search,
-  PieChart
+  PieChart,
+  AlertTriangle,
+  CheckCircle,
+  Clock
 } from 'lucide-react';
 import { StockData } from '@/lib/stocks';
 import { NewsItem } from '@/lib/news';
@@ -85,6 +94,8 @@ export default function Dashboard() {
   const [selectedSector, setSelectedSector] = useState<string>('all');
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     if (!loading && !user) {
@@ -110,47 +121,62 @@ export default function Dashboard() {
     };
   }, [autoRefresh]);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
+    if (!user) return;
+    
     setIsLoading(true);
     try {
-      // Fetch market overview
-      const overviewResponse = await fetch('/api/market/overview');
-      const overviewData = await overviewResponse.json();
-      setMarketOverview(overviewData.marketOverview);
+      // Fetch all data in parallel for better performance
+      const [overviewResponse, stocksResponse, sectorsResponse, newsResponse, watchlistResponse] = await Promise.allSettled([
+        fetch('/api/market/overview'),
+        fetch(`/api/stocks/all?filter=${selectedFilter}${selectedSector !== 'all' ? `&sector=${selectedSector}` : ''}`),
+        fetch('/api/stocks/sectors'),
+        fetch('/api/news?limit=10'),
+        fetch('/api/watchlist', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        })
+      ]);
 
-      // Fetch stocks data with filter
-      const stocksUrl = `/api/stocks/all?filter=${selectedFilter}${selectedSector !== 'all' ? `&sector=${selectedSector}` : ''}`;
-      const stocksResponse = await fetch(stocksUrl);
-      const stocksData = await stocksResponse.json();
-      setStocks(stocksData.stocks || []);
+      // Handle market overview
+      if (overviewResponse.status === 'fulfilled' && overviewResponse.value.ok) {
+        const overviewData = await overviewResponse.value.json();
+        setMarketOverview(overviewData.marketOverview);
+      }
 
-      // Fetch sector analysis
-      const sectorsResponse = await fetch('/api/stocks/sectors');
-      const sectorsData = await sectorsResponse.json();
-      setSectorAnalysis(sectorsData.sectors || []);
+      // Handle stocks data
+      if (stocksResponse.status === 'fulfilled' && stocksResponse.value.ok) {
+        const stocksData = await stocksResponse.value.json();
+        setStocks(stocksData.stocks || []);
+      }
 
-      // Fetch news
-      const newsResponse = await fetch('/api/news?limit=10');
-      const newsData = await newsResponse.json();
-      setNews(newsData.news || []);
+      // Handle sector analysis
+      if (sectorsResponse.status === 'fulfilled' && sectorsResponse.value.ok) {
+        const sectorsData = await sectorsResponse.value.json();
+        setSectorAnalysis(sectorsData.sectors || []);
+      }
 
-      // Fetch user watchlist
-      const watchlistResponse = await fetch('/api/watchlist', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (watchlistResponse.ok) {
-        const watchlistData = await watchlistResponse.json();
+      // Handle news
+      if (newsResponse.status === 'fulfilled' && newsResponse.value.ok) {
+        const newsData = await newsResponse.value.json();
+        setNews(newsData.news || []);
+      }
+
+      // Handle watchlist
+      if (watchlistResponse.status === 'fulfilled' && watchlistResponse.value.ok) {
+        const watchlistData = await watchlistResponse.value.json();
         setWatchlist(watchlistData.watchlist || []);
       }
+
+      setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast.error('Failed to fetch dashboard data');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedFilter, selectedSector, user]);
 
   const handleToggleWatch = async (symbol: string) => {
     try {
@@ -184,6 +210,23 @@ export default function Dashboard() {
     toast.success('Data refreshed successfully');
   };
 
+  // Memoized calculations for performance
+  const watchedStocks = useMemo(() => 
+    stocks.filter(stock => watchlist.includes(stock.symbol)), 
+    [stocks, watchlist]
+  );
+
+  const marketStats = useMemo(() => {
+    if (!marketOverview) return null;
+    
+    return {
+      totalStocks: marketOverview.totalStocks,
+      gainersPercent: (marketOverview.gainers / marketOverview.totalStocks) * 100,
+      losersPercent: (marketOverview.losers / marketOverview.totalStocks) * 100,
+      unchangedPercent: (marketOverview.unchanged / marketOverview.totalStocks) * 100
+    };
+  }, [marketOverview]);
+
   if (loading || !user) {
     return (
       <div className="min-h-screen main-bg flex items-center justify-center">
@@ -194,8 +237,6 @@ export default function Dashboard() {
       </div>
     );
   }
-
-  const watchedStocks = stocks.filter(stock => watchlist.includes(stock.symbol));
 
   return (
     <div className="min-h-screen main-bg">
@@ -212,6 +253,14 @@ export default function Dashboard() {
               <p className="text-muted-foreground">
                 Nifty 50 Market Dashboard - Real-time insights and analysis
               </p>
+              {lastUpdated && (
+                <div className="flex items-center gap-2 mt-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">
+                    Last updated: {lastUpdated.toLocaleTimeString()}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <Button
@@ -258,7 +307,7 @@ export default function Dashboard() {
                   <PieChart className="h-8 w-8 text-green-600" />
                   <div>
                     <p className="font-semibold">Portfolio</p>
-                    <p className="text-sm text-muted-foreground">Optimize holdings</p>
+                    <p className="text-sm text-muted-foreground">Track holdings</p>
                   </div>
                 </div>
               </CardContent>
@@ -295,7 +344,9 @@ export default function Dashboard() {
         </div>
 
         {/* Market Overview Cards */}
-        {marketOverview && (
+        {isLoading ? (
+          <MarketOverviewSkeleton />
+        ) : marketOverview && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <Card className="minimal-card">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -335,6 +386,11 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground">
                   {marketOverview.gainers} gainers, {marketOverview.losers} losers
                 </p>
+                {marketStats && (
+                  <div className="mt-2">
+                    <Progress value={marketStats.gainersPercent} className="h-1" />
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -379,184 +435,120 @@ export default function Dashboard() {
           <MarketIndicesWidget />
         </div>
 
-        {/* Filters */}
-        <div className="flex gap-4 mb-6">
-          <Select value={selectedFilter} onValueChange={setSelectedFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter stocks" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Stocks</SelectItem>
-              <SelectItem value="gainers">Top Gainers</SelectItem>
-              <SelectItem value="losers">Top Losers</SelectItem>
-              <SelectItem value="active">Most Active</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedSector} onValueChange={setSelectedSector}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Select sector" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Sectors</SelectItem>
-              {sectorAnalysis.map(sector => (
-                <SelectItem key={sector.sector} value={sector.sector}>
-                  {sector.sector} ({sector.stockCount})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
         {/* Main Content Tabs */}
-        <Tabs defaultValue="stocks" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="stocks">Nifty 50 Stocks</TabsTrigger>
-            <TabsTrigger value="sectors">Sector Analysis</TabsTrigger>
-            <TabsTrigger value="news">Market News</TabsTrigger>
-            <TabsTrigger value="watchlist">My Watchlist</TabsTrigger>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-7">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="stocks">Stocks</TabsTrigger>
+            <TabsTrigger value="heatmap">Heatmap</TabsTrigger>
+            <TabsTrigger value="movers">Movers</TabsTrigger>
+            <TabsTrigger value="technical">Technical</TabsTrigger>
+            <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
+            <TabsTrigger value="alerts">Alerts</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="stocks" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {stocks.map((stock) => (
-                <StockCard
-                  key={stock.symbol}
-                  stock={stock}
-                  isWatched={watchlist.includes(stock.symbol)}
-                  onToggleWatch={() => handleToggleWatch(stock.symbol)}
-                />
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="sectors" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {sectorAnalysis.map((sector) => (
-                <Card key={sector.sector} className="minimal-card">
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span className="text-lg">{sector.sector}</span>
-                      <Badge className={`${sector.sentiment.label === 'positive' ? 'sentiment-positive' :
-                        sector.sentiment.label === 'negative' ? 'sentiment-negative' : 'sentiment-neutral'
-                        }`}>
-                        {sector.sentiment.label}
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      {sector.stockCount} stocks • {sector.totalWeightage.toFixed(1)}% weightage
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>Performance</span>
-                        <span className={sector.avgChange >= 0 ? 'text-green-600' : 'text-red-600'}>
+          <TabsContent value="overview" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <MarketMovers stocks={stocks} isLoading={isLoading} />
+              <Card className="minimal-card">
+                <CardHeader>
+                  <CardTitle>Sector Performance</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {sectorAnalysis.slice(0, 6).map((sector) => (
+                    <div key={sector.sector} className="flex items-center justify-between py-3 border-b last:border-b-0">
+                      <div className="flex items-center gap-3">
+                        <Building2 className="h-4 w-4 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium">{sector.sector}</p>
+                          <p className="text-sm text-muted-foreground">{sector.stockCount} stocks</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`font-semibold ${sector.avgChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {sector.avgChange > 0 ? '+' : ''}{sector.avgChange.toFixed(2)}%
-                        </span>
-                      </div>
-                      <Progress value={Math.abs(sector.avgChange) * 10} className="h-2" />
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div>
-                        <div className="text-green-600 font-semibold">{sector.gainers}</div>
-                        <div className="text-xs text-muted-foreground">Gainers</div>
-                      </div>
-                      <div>
-                        <div className="text-red-600 font-semibold">{sector.losers}</div>
-                        <div className="text-xs text-muted-foreground">Losers</div>
-                      </div>
-                      <div>
-                        <div className="text-yellow-600 font-semibold">{sector.neutral}</div>
-                        <div className="text-xs text-muted-foreground">Neutral</div>
+                        </p>
+                        <Badge className={`${sector.sentiment.label === 'positive' ? 'sentiment-positive' :
+                          sector.sentiment.label === 'negative' ? 'sentiment-negative' : 'sentiment-neutral'
+                          }`}>
+                          {sector.sentiment.label}
+                        </Badge>
                       </div>
                     </div>
-
-                    <div>
-                      <div className="text-sm font-medium mb-2">Top Movers</div>
-                      <div className="space-y-1">
-                        {sector.topStocks.map((stock) => (
-                          <div key={stock.symbol} className="flex justify-between text-xs">
-                            <span>{stock.symbol}</span>
-                            <span className={stock.changePercent >= 0 ? 'text-green-600' : 'text-red-600'}>
-                              {stock.changePercent > 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                  ))}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
 
-          <TabsContent value="news" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {news.map((item) => (
-                <Card key={item.id} className="minimal-card">
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <CardTitle className="text-base line-clamp-2">{item.title}</CardTitle>
-                        <CardDescription className="mt-2">
-                          {item.source} • {new Date(item.publishedAt).toLocaleDateString()}
-                        </CardDescription>
-                      </div>
-                      <Badge className={`ml-2 ${item.sentiment?.label === 'positive' ? 'sentiment-positive' :
-                        item.sentiment?.label === 'negative' ? 'sentiment-negative' : 'sentiment-neutral'
-                        }`}>
-                        {item.sentiment?.label}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground line-clamp-3 mb-3">
-                      {item.description}
-                    </p>
-                    {item.tags && item.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {item.tags.slice(0, 3).map((tag) => (
-                          <Badge key={tag} variant="secondary" className="text-xs">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
+          <TabsContent value="stocks" className="space-y-6">
+            {/* Filters */}
+            <div className="flex gap-4 mb-6">
+              <Select value={selectedFilter} onValueChange={setSelectedFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter stocks" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Stocks</SelectItem>
+                  <SelectItem value="gainers">Top Gainers</SelectItem>
+                  <SelectItem value="losers">Top Losers</SelectItem>
+                  <SelectItem value="active">Most Active</SelectItem>
+                </SelectContent>
+              </Select>
 
-          <TabsContent value="watchlist" className="space-y-6">
-            {watchedStocks.length > 0 ? (
+              <Select value={selectedSector} onValueChange={setSelectedSector}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select sector" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sectors</SelectItem>
+                  {sectorAnalysis.map(sector => (
+                    <SelectItem key={sector.sector} value={sector.sector}>
+                      {sector.sector} ({sector.stockCount})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {isLoading ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {watchedStocks.map((stock) => (
+                {[...Array(12)].map((_, i) => (
+                  <StockCardSkeleton key={i} />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {stocks.map((stock) => (
                   <StockCard
                     key={stock.symbol}
                     stock={stock}
-                    isWatched={true}
+                    isWatched={watchlist.includes(stock.symbol)}
                     onToggleWatch={() => handleToggleWatch(stock.symbol)}
                   />
                 ))}
               </div>
-            ) : (
-              <Card className="minimal-card">
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <Target className="h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No stocks in watchlist</h3>
-                  <p className="text-muted-foreground text-center mb-4">
-                    Add stocks to your watchlist to track them here
-                  </p>
-                  <Button onClick={() => router.push('/stocks')}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Browse Stocks
-                  </Button>
-                </CardContent>
-              </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="heatmap" className="space-y-6">
+            <MarketHeatmap stocks={stocks} isLoading={isLoading} />
+          </TabsContent>
+
+          <TabsContent value="movers" className="space-y-6">
+            <MarketMovers stocks={stocks} isLoading={isLoading} />
+          </TabsContent>
+
+          <TabsContent value="technical" className="space-y-6">
+            <TechnicalScanner stocks={stocks} />
+          </TabsContent>
+
+          <TabsContent value="portfolio" className="space-y-6">
+            <PortfolioTracker stocks={stocks} />
+          </TabsContent>
+
+          <TabsContent value="alerts" className="space-y-6">
+            <PriceAlerts watchlist={watchlist} />
           </TabsContent>
         </Tabs>
       </div>
