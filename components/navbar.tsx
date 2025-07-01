@@ -19,7 +19,11 @@ import {
   LogOut,
   Settings,
   Menu,
-  X
+  X,
+  Search,
+  Target,
+  PieChart,
+  Activity
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -31,7 +35,10 @@ const Navbar = () => {
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: BarChart3 },
     { name: 'Stocks', href: '/stocks', icon: TrendingUp },
+    { name: 'Screener', href: '/stocks/screener', icon: Search },
+    { name: 'Portfolio', href: '/portfolio', icon: PieChart },
     { name: 'News', href: '/news', icon: TrendingUp },
+    { name: 'Performance', href: '/performance', icon: Activity },
   ];
 
   const isActive = (href: string) => pathname === href;

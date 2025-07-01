@@ -5,6 +5,7 @@ import { useAuth } from '@/components/auth-provider';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/navbar';
 import StockCard from '@/components/stock-card';
+import MarketIndicesWidget from '@/components/market-indices-widget';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,11 +26,14 @@ import {
   Newspaper,
   Target,
   Users,
-  Zap
+  Zap,
+  Search,
+  PieChart
 } from 'lucide-react';
 import { StockData } from '@/lib/stocks';
 import { NewsItem } from '@/lib/news';
 import { toast } from 'sonner';
+import Link from 'next/link';
 
 interface MarketOverview {
   totalStocks: number;
@@ -231,6 +235,65 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <Link href="/stocks/screener">
+            <Card className="minimal-card hover:shadow-lg transition-all cursor-pointer">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <Search className="h-8 w-8 text-primary" />
+                  <div>
+                    <p className="font-semibold">Stock Screener</p>
+                    <p className="text-sm text-muted-foreground">Advanced filtering</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link href="/portfolio">
+            <Card className="minimal-card hover:shadow-lg transition-all cursor-pointer">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <PieChart className="h-8 w-8 text-green-600" />
+                  <div>
+                    <p className="font-semibold">Portfolio</p>
+                    <p className="text-sm text-muted-foreground">Optimize holdings</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link href="/news">
+            <Card className="minimal-card hover:shadow-lg transition-all cursor-pointer">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <Newspaper className="h-8 w-8 text-blue-600" />
+                  <div>
+                    <p className="font-semibold">Market News</p>
+                    <p className="text-sm text-muted-foreground">Latest updates</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+
+          <Link href="/performance">
+            <Card className="minimal-card hover:shadow-lg transition-all cursor-pointer">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <Activity className="h-8 w-8 text-purple-600" />
+                  <div>
+                    <p className="font-semibold">Performance</p>
+                    <p className="text-sm text-muted-foreground">App metrics</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
+
         {/* Market Overview Cards */}
         {marketOverview && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -310,6 +373,11 @@ export default function Dashboard() {
             </Card>
           </div>
         )}
+
+        {/* Market Indices Widget */}
+        <div className="mb-8">
+          <MarketIndicesWidget />
+        </div>
 
         {/* Filters */}
         <div className="flex gap-4 mb-6">
